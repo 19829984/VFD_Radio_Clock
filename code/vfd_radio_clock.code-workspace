@@ -14,6 +14,16 @@
 			"IDF_CCACHE_ENABLE": "1",
 			"ESP_ROM_ELF_DIR": "C:\\Users\\Bowen\\.espressif\\tools\\esp-rom-elfs\\20230320/"
 		},
-		"idf.gitPathWin": "C:\\Users\\Bowen\\.espressif\\tools\\idf-git\\2.39.2\\cmd\\git.exe"
+		"idf.gitPathWin": "C:\\Users\\Bowen\\.espressif\\tools\\idf-git\\2.39.2\\cmd\\git.exe",
+		"files.associations": {
+			"chrono": "c",
+			"xlocale": "c",
+			"format": "c",
+			"semphr.h": "c",
+			"adc_continuous.h": "c",
+			"event_groups.h": "c",
+			"xiosbase": "c",
+			"atomic": "c"
+		}
 	}
 }
