@@ -23,7 +23,8 @@
 			"adc_continuous.h": "c",
 			"event_groups.h": "c",
 			"xiosbase": "c",
-			"atomic": "c"
+			"atomic": "c",
+			"filesystem": "c"
 		}
 	}
 }

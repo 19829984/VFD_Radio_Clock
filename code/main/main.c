@@ -25,38 +25,46 @@
 #include "lwip/err.h"
 #include "lwip/sys.h"
 
+#define DEBUG
 
 // WIFI
-#define WIFI_SSID "MIT GUEST"
+#define WIFI_SSID "EECS_Labs"
 #define WIFI_PASS ""
 
 #define ESP_WIFI_SCAN_AUTH_MODE_THRESHOLD WIFI_AUTH_OPEN
 #define WIFI_CONNECTED_BIT BIT0
-#define WIFI_FAIL_BIT      BIT1
+#define WIFI_FAIL_BIT BIT1
 static EventGroupHandle_t s_wifi_event_group;
 static int s_retry_num = 0;
-static void event_handler(void* arg, esp_event_base_t event_base,
-                                int32_t event_id, void* event_data)
+static void event_handler(void *arg, esp_event_base_t event_base,
+                          int32_t event_id, void *event_data)
 {
-    if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_START) {
+    if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_START)
+    {
         esp_wifi_connect();
-    } else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_DISCONNECTED) {
-        if (s_retry_num < 10) {
+    }
+    else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_DISCONNECTED)
+    {
+        if (s_retry_num < 10)
+        {
             esp_wifi_connect();
             s_retry_num++;
             ESP_LOGI("WIFI Handler", "retry to connect to the AP");
-        } else {
+        }
+        else
+        {
             xEventGroupSetBits(s_wifi_event_group, WIFI_FAIL_BIT);
         }
-        ESP_LOGI("WIFI Handler","connect to the AP fail");
-    } else if (event_base == IP_EVENT && event_id == IP_EVENT_STA_GOT_IP) {
-        ip_event_got_ip_t* event = (ip_event_got_ip_t*) event_data;
+        ESP_LOGI("WIFI Handler", "connect to the AP fail");
+    }
+    else if (event_base == IP_EVENT && event_id == IP_EVENT_STA_GOT_IP)
+    {
+        ip_event_got_ip_t *event = (ip_event_got_ip_t *)event_data;
         ESP_LOGI("WIFI Handler", "got ip:" IPSTR, IP2STR(&event->ip_info.ip));
         s_retry_num = 0;
         xEventGroupSetBits(s_wifi_event_group, WIFI_CONNECTED_BIT);
     }
 }
-
 
 // ADC
 #define ADC_ATTENUATION ADC_ATTEN_DB_11
@@ -80,39 +88,55 @@ static void event_handler(void* arg, esp_event_base_t event_base,
 #define SPI2_CLK_PIN 12
 
 // LEDC
-#define LEDC_TIMER              LEDC_TIMER_0
-#define LEDC_MODE               LEDC_LOW_SPEED_MODE
-#define LEDC_HS_CH0_GPIO        VFD0_EN_PIN
-#define LEDC_HS_CH0_CHANNEL     LEDC_CHANNEL_0
-#define LEDC_HS_CH1_GPIO        VFD1_EN_PIN
-#define LEDC_HS_CH1_CHANNEL     LEDC_CHANNEL_1
-#define LEDC_HS_CH2_GPIO        VFD2_EN_PIN
-#define LEDC_HS_CH2_CHANNEL     LEDC_CHANNEL_2
-#define LEDC_HS_CH3_GPIO        VFD3_EN_PIN
-#define LEDC_HS_CH3_CHANNEL     LEDC_CHANNEL_3
-#define LEDC_DUTY_RES           LEDC_TIMER_13_BIT // Set duty resolution to 13 bits
-#define LEDC_DUTY               (2048) // Set duty to 50%. (2 ** 13) * 50% = 4096
-#define LEDC_FREQUENCY          (100) // Frequency in Hertz. Set frequency at 100 Hz
-
+#define LEDC_TIMER LEDC_TIMER_0
+#define LEDC_MODE LEDC_LOW_SPEED_MODE
+#define LEDC_HS_CH0_GPIO VFD0_EN_PIN
+#define LEDC_HS_CH0_CHANNEL LEDC_CHANNEL_0
+#define LEDC_HS_CH1_GPIO VFD1_EN_PIN
+#define LEDC_HS_CH1_CHANNEL LEDC_CHANNEL_1
+#define LEDC_HS_CH2_GPIO VFD2_EN_PIN
+#define LEDC_HS_CH2_CHANNEL LEDC_CHANNEL_2
+#define LEDC_HS_CH3_GPIO VFD3_EN_PIN
+#define LEDC_HS_CH3_CHANNEL LEDC_CHANNEL_3
+#define LEDC_DUTY_RES LEDC_TIMER_13_BIT // Set duty resolution to 13 bits
+#define LEDC_DUTY (2048)                // Set duty to 50%. (2 ** 13) * 50% = 4096
+#define LEDC_FREQUENCY (100)            // Frequency in Hertz. Set frequency at 100 Hz
 
 uint8_t digit_index = 0;
 uint8_t vfd_digits_io[4] = {VFD0_EN_PIN, VFD2_EN_PIN, VFD3_EN_PIN, VFD1_EN_PIN};
 uint8_t digits_to_display[4] = {1, 2, 3, 4};
+uint8_t decimal_point = 0b00000000;
 spi_device_handle_t spi_handle = NULL;
 dedic_gpio_bundle_handle_t bundleA = NULL;
 
 spi_transaction_t vfd_transaction = {
-    // .flags = SPI_TRANS_USE_TXDATA,
+    .flags = SPI_TRANS_USE_TXDATA,
     .length = 8,
-    .tx_buffer = vfd_digits,
+    // .tx_buffer = vfd_digits,
 };
+
+inline bool is_decimal(uint8_t digit)
+{
+    return (decimal_point & (0b00000001 << digit)) > 0;
+}
+
+inline void set_decimal(uint8_t digit)
+{
+    decimal_point |= 0b00000001 << digit;
+}
+
+inline void set_decimal_mask(uint8_t mask)
+{
+    decimal_point = mask;
+}
+
 // TIMER
 static bool change_digit(gptimer_handle_t timer, const gptimer_alarm_event_data_t *edata, void *user_ctx)
 {
-    digit_index = (digit_index + 1) % 4;
-    vfd_transaction.tx_buffer = vfd_digits + digits_to_display[digit_index];
+    digit_index = (digit_index + 1) & 0b11;
+    vfd_transaction.tx_data[0] = vfd_digits[digits_to_display[digit_index] + (is_decimal(digit_index)  << 4)];
     dedic_gpio_bundle_write(bundleA, 0b1111, 0b0001 << digit_index);
-    spi_device_queue_trans(spi_handle, &vfd_transaction, 0);
+    spi_device_queue_trans(spi_handle, &vfd_transaction, 1);
     return true;
 }
 
@@ -187,29 +211,34 @@ void wifi_init_sta(void)
             .sae_h2e_identifier = "",
         },
     };
-    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA) );
-    ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wifi_config) );
-    ESP_ERROR_CHECK(esp_wifi_start() );
+    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
+    ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wifi_config));
+    ESP_ERROR_CHECK(esp_wifi_start());
 
     ESP_LOGI("WIFI INIT", "wifi_init_sta finished.");
 
     /* Waiting until either the connection is established (WIFI_CONNECTED_BIT) or connection failed for the maximum
      * number of re-tries (WIFI_FAIL_BIT). The bits are set by event_handler() (see above) */
     EventBits_t bits = xEventGroupWaitBits(s_wifi_event_group,
-            WIFI_CONNECTED_BIT | WIFI_FAIL_BIT,
-            pdFALSE,
-            pdFALSE,
-            portMAX_DELAY);
+                                           WIFI_CONNECTED_BIT | WIFI_FAIL_BIT,
+                                           pdFALSE,
+                                           pdFALSE,
+                                           portMAX_DELAY);
 
     /* xEventGroupWaitBits() returns the bits before the call returned, hence we can test which event actually
      * happened. */
-    if (bits & WIFI_CONNECTED_BIT) {
+    if (bits & WIFI_CONNECTED_BIT)
+    {
         ESP_LOGI("WIFI INIT", "connected to ap SSID:%s password:%s",
                  WIFI_SSID, WIFI_PASS);
-    } else if (bits & WIFI_FAIL_BIT) {
+    }
+    else if (bits & WIFI_FAIL_BIT)
+    {
         ESP_LOGI("WIFI INIT", "Failed to connect to SSID:%s, password:%s",
                  WIFI_SSID, WIFI_PASS);
-    } else {
+    }
+    else
+    {
         ESP_LOGE("WIFI INIT", "UNEXPECTED EVENT");
     }
 }
@@ -217,12 +246,11 @@ void wifi_init_sta(void)
 void app_main(void)
 {
     esp_err_t ret = nvs_flash_init();
-    if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
-      ESP_ERROR_CHECK(nvs_flash_erase());
-      ret = nvs_flash_init();
+    if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND)
+    {
+        ESP_ERROR_CHECK(nvs_flash_erase());
+        ret = nvs_flash_init();
     }
-    wifi_init_sta();
-    
 
     // esp_err_t ret;
     uint32_t ret_num = 0;
@@ -249,8 +277,15 @@ void app_main(void)
     gpio_config_t io_conf = {};
     io_conf.intr_type = GPIO_INTR_DISABLE;
     io_conf.mode = GPIO_MODE_OUTPUT;
-    io_conf.pin_bit_mask = GPIO_OUTPUT_PIN_SEL;
+    io_conf.pin_bit_mask = (1ULL << V27_EN_PIN);
     io_conf.pull_down_en = 0;
+    io_conf.pull_up_en = 0;
+    gpio_config(&io_conf);
+
+    io_conf.intr_type = GPIO_INTR_DISABLE;
+    io_conf.mode = GPIO_MODE_OUTPUT;
+    io_conf.pin_bit_mask = (1ULL << SHIFT_REG_OE_PIN);
+    io_conf.pull_down_en = 1;
     io_conf.pull_up_en = 0;
     gpio_config(&io_conf);
 
@@ -293,7 +328,7 @@ void app_main(void)
     //     .speed_mode = LEDC_MODE,           // timer mode
     //     .timer_num = LEDC_TIMER,            // timer index
     //     .clk_cfg = LEDC_AUTO_CLK,              // Auto select the source clock
-    // }; 
+    // };
     // ledc_timer_config(&ledc_timer);
 
     // ledc_channel_config_t ledc_channel[4] = {
@@ -344,7 +379,8 @@ void app_main(void)
     gpio_config_t dedicated_io_conf = {
         .mode = GPIO_MODE_OUTPUT,
     };
-    for (int i = 0; i < sizeof(bundleA_gpios) / sizeof(bundleA_gpios[0]); i++) {
+    for (int i = 0; i < sizeof(bundleA_gpios) / sizeof(bundleA_gpios[0]); i++)
+    {
         dedicated_io_conf.pin_bit_mask = 1ULL << bundleA_gpios[i];
         gpio_config(&dedicated_io_conf);
     }
@@ -368,7 +404,7 @@ void app_main(void)
 
     gptimer_alarm_config_t alarm_config = {
         .reload_count = 0,
-        .alarm_count = 1*4000, // Run at 100 Hz, or 2.5ms per alarm
+        .alarm_count = 1 * 1000, // 4000 us or 4 ms per alarm, 250 Hz
         .flags.auto_reload_on_alarm = true,
     };
     ESP_ERROR_CHECK(gptimer_set_alarm_action(gptimer, &alarm_config));
@@ -385,25 +421,54 @@ void app_main(void)
     int avg_raw_data = 0;
     int mv_data = 0;
 
-    gpio_set_level(V27_EN_PIN, 0);
+    gpio_set_level(V27_EN_PIN, 1);
+    gpio_pulldown_en(SHIFT_REG_OE_PIN);
     gpio_set_level(SHIFT_REG_OE_PIN, 0);
     // gpio_set_level(VFD0_EN_PIN, 0);
     // gpio_set_level(VFD1_EN_PIN, 1);
     // gpio_set_level(VFD2_EN_PIN, 0);
     // gpio_set_level(VFD3_EN_PIN, 0);
-
+    // gpio_dump_io_configuration();
     tx_data_test = 255;
 
+#ifdef DEBUG
+    uint16_t digit = 0;
+    // set_decimal_mask(0x0F);
+    set_decimal(1);
+    while (1){
+        digits_to_display[0] = (digit >> 12);
+        digits_to_display[1] = ((digit >> 8) & 0xF);
+        digits_to_display[2] = (digit >> 4) & 0xF;
+        digits_to_display[3] = digit & 0xF;
+    
+        // if (++digit == NUM_VFD_DIGITS)
+        // if (digit == 16)
+            // digit = 0;
+        // else
+        //     digit = 16;
+        // ESP_LOGI("DEBUG", "Digit: %d", digit);
+        uint64_t count = 0;
+        gptimer_get_raw_count(gptimer, &count);
+        // ESP_LOGI("DEBUG", "Alarm count: %llu", count);
+        // ESP_LOGI("DEBUG", "Vfd Transaction: %p", vfd_transaction.tx_buffer);
+        // ESP_LOGI("DEBUG", "Vfd digit_index: %d", digit_index);
+        digit++;
+        vTaskDelay(8);
+    }
+#else
+
+    wifi_init_sta();
     time_t now;
     // char strftime_buf[64];
     struct tm timeinfo;
-    
+
     setenv("TZ", "UTC-5", 1);
     tzset();
-    
+
     esp_sntp_config_t config = ESP_NETIF_SNTP_DEFAULT_CONFIG("pool.ntp.org");
     esp_netif_sntp_init(&config);
-    if (esp_netif_sntp_sync_wait(pdMS_TO_TICKS(10000)) != ESP_OK) {
+    if (esp_netif_sntp_sync_wait(pdMS_TO_TICKS(10000)) != ESP_OK)
+    {
         ESP_LOGE("NETIF SNTP", "Failed to update system time within 10s timeout");
     }
     while (1)
@@ -454,5 +519,7 @@ void app_main(void)
         // }
         vTaskDelay(100);
     }
+#endif
+   vTaskDelay(100);
+    }
 
-}
