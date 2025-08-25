@@ -2,9 +2,9 @@
 #define VFD_DIGITS_H
 #include <inttypes.h>
 
-const uint8_t NUM_VFD_DIGITS = 34;
+const uint8_t NUM_VFD_DIGITS = 35;
 
-const uint8_t vfd_digits[34] = {
+const uint8_t vfd_digits[35] = {
     0b11111100, // 0 
     0b01100000, // 1
     0b11011010, // 2
@@ -38,7 +38,8 @@ const uint8_t vfd_digits[34] = {
     0b10011111, // E.
     0b10001111, // F.
     0b00000001, // .
-    0b11111111  // DEBUG ALL SEGMENT
+    0b11111111,  // DEBUG ALL SEGMENT
+    0b00000000  // DEBUG ALL SEGMENT OFF
 };
 
 #endif

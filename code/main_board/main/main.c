@@ -67,7 +67,7 @@ static void event_handler(void *arg, esp_event_base_t event_base,
 }
 
 // ADC
-#define ADC_ATTENUATION ADC_ATTEN_DB_11
+#define ADC_ATTENUATION ADC_ATTEN_DB_12
 #define ADC_READ_LEN 128
 #define _ADC_UNIT_STR(unit) #unit
 #define ADC_UNIT_STR(unit) _ADC_UNIT_STR(unit)
@@ -82,7 +82,7 @@ static void event_handler(void *arg, esp_event_base_t event_base,
 #define GPIO_OUTPUT_PIN_SEL ((1ULL << V27_EN_PIN) | (1ULL << SHIFT_REG_OE_PIN))
 
 // SPI
-#define SPI_HOST SPI2_HOST
+#define SHIFT_REG_SPI_HOST SPI2_HOST
 #define SPI2_CS_PIN 10
 #define SPI2_DATA_PIN 11
 #define SPI2_CLK_PIN 12
@@ -115,6 +115,13 @@ spi_transaction_t vfd_transaction = {
     // .tx_buffer = vfd_digits,
 };
 
+spi_transaction_t vfd_blank_transaction = {
+    .flags = SPI_TRANS_USE_TXDATA,
+    .length = 8,
+    .tx_data[0] = 0,
+    // .tx_buffer = vfd_digits,
+};
+
 inline bool is_decimal(uint8_t digit)
 {
     return (decimal_point & (0b00000001 << digit)) > 0;
@@ -130,13 +137,21 @@ inline void set_decimal_mask(uint8_t mask)
     decimal_point = mask;
 }
 
+// SPI Callback
+void spi_callback_turn_on_EN_gpio(spi_transaction_t *trans){
+    esp_rom_delay_us(200);
+    dedic_gpio_bundle_write(bundleA, 0b1111, 0b0001 << digit_index);
+}
+void spi_callback_turn_off_EN_gpio(spi_transaction_t *trans){
+    dedic_gpio_bundle_write(bundleA, 0b1111, 0);
+}
+
 // TIMER
 static bool change_digit(gptimer_handle_t timer, const gptimer_alarm_event_data_t *edata, void *user_ctx)
 {
     digit_index = (digit_index + 1) & 0b11;
     vfd_transaction.tx_data[0] = vfd_digits[digits_to_display[digit_index] + (is_decimal(digit_index)  << 4)];
-    dedic_gpio_bundle_write(bundleA, 0b1111, 0b0001 << digit_index);
-    spi_device_queue_trans(spi_handle, &vfd_transaction, 1);
+    spi_device_polling_transmit(spi_handle, &vfd_transaction);
     return true;
 }
 
@@ -295,8 +310,9 @@ void app_main(void)
         .miso_io_num = -1,
         .mosi_io_num = SPI2_DATA_PIN,
         .sclk_io_num = SPI2_CLK_PIN,
+        .flags = SPICOMMON_BUSFLAG_MASTER,
     };
-    ret = spi_bus_initialize(SPI_HOST, &spi_bus_cfg, SPI_DMA_CH_AUTO);
+    ret = spi_bus_initialize(SHIFT_REG_SPI_HOST, &spi_bus_cfg, 0);
     ESP_ERROR_CHECK(ret);
 
     spi_device_interface_config_t spi_interface_cfg = {
@@ -306,8 +322,11 @@ void app_main(void)
         .queue_size = 1,
         .mode = 0,
         .spics_io_num = SPI2_CS_PIN,
-        .flags = SPI_DEVICE_TXBIT_LSBFIRST};
-    err = spi_bus_add_device(SPI_HOST, &spi_interface_cfg, &spi_handle);
+        .flags = SPI_DEVICE_TXBIT_LSBFIRST | SPI_DEVICE_CLK_AS_CS,
+        .pre_cb = &spi_callback_turn_off_EN_gpio,
+        .post_cb = &spi_callback_turn_on_EN_gpio,
+    };
+    err = spi_bus_add_device(SHIFT_REG_SPI_HOST, &spi_interface_cfg, &spi_handle);
     if (err)
     {
         ESP_LOGE("SPI", "SPI Initialization failed!");
@@ -404,7 +423,7 @@ void app_main(void)
 
     gptimer_alarm_config_t alarm_config = {
         .reload_count = 0,
-        .alarm_count = 1 * 1000, // 4000 us or 4 ms per alarm, 250 Hz
+        .alarm_count = 1 * 1000 * 4, // 4000 us per alarm, 16000 us for 4 digits. 62.5hz 
         .flags.auto_reload_on_alarm = true,
     };
     ESP_ERROR_CHECK(gptimer_set_alarm_action(gptimer, &alarm_config));
@@ -435,12 +454,16 @@ void app_main(void)
     uint16_t digit = 0;
     // set_decimal_mask(0x0F);
     set_decimal(1);
+    int spi_freq = 0;
+    spi_device_get_actual_freq(spi_handle, &spi_freq);
     while (1){
+        ESP_LOGI("SPI", "Actual SPI Clock: %d", spi_freq);
+        // TODO: Perhaps a double buffer system
+        digit++;
         digits_to_display[0] = (digit >> 12);
         digits_to_display[1] = ((digit >> 8) & 0xF);
         digits_to_display[2] = (digit >> 4) & 0xF;
         digits_to_display[3] = digit & 0xF;
-    
         // if (++digit == NUM_VFD_DIGITS)
         // if (digit == 16)
             // digit = 0;
@@ -452,7 +475,7 @@ void app_main(void)
         // ESP_LOGI("DEBUG", "Alarm count: %llu", count);
         // ESP_LOGI("DEBUG", "Vfd Transaction: %p", vfd_transaction.tx_buffer);
         // ESP_LOGI("DEBUG", "Vfd digit_index: %d", digit_index);
-        digit++;
+        // digit++;
         vTaskDelay(8);
     }
 #else
